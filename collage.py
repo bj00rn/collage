@@ -13,8 +13,6 @@ from optparse import OptionParser
 
 from PIL import Image, ImageFont, ImageDraw
 
-import settings
-
 
 def parse_files(option, opt, value, parser):
     valid_images = []
@@ -24,44 +22,55 @@ def parse_files(option, opt, value, parser):
             valid_images.append(image_path)
     setattr(parser.values, option.dest, None if len(valid_images) < 1 else valid_images)
 
-# Command-line options
-parser = OptionParser()
-parser.add_option('-i', '--input', dest="INPUT_DIR", action='store',
+
+def parse_options(argv, settings):
+    parser = OptionParser()
+    parser.add_option('-i', '--input', dest="INPUT_DIR", action='store',
                   default=settings.INPUT_DIR, help='Specify input directory')
-parser.add_option('-o', '--output', dest='OUTPUT_FILE', action='store',
+    parser.add_option('-o', '--output', dest='OUTPUT_FILE', action='store',
                   default=settings.OUTPUT_FILE, help='Specify output file')
-parser.add_option('-q', '--quality', dest='OUTPUT_QUALITY', action='store',
+    parser.add_option('-q', '--quality', dest='OUTPUT_QUALITY', action='store',
                   default=settings.OUTPUT_QUALITY, help='Specify quality of output file', type='int')
-parser.add_option('--settings', dest='settings_module', action='store',
+    parser.add_option('--settings', dest='settings_module', action='store',
                   default='settings_local', help='Specify settings module')
-parser.add_option('-f', '--files',
+    parser.add_option('-f', '--files',
                   type='string',
                   action='callback',
                   dest='files',
                   help='Specify comma separated list paths of ordered images to sequence',
                   callback=parse_files)
-(options, args) = parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def debug(s):
     sys.stderr.write('%s\n' % s)
 
 
-try:
-    settings = __import__(options.settings_module, globals(), locals(),
-                          [], -1)
-except ImportError:
-    if options.settings_module != 'settings_local':
-        debug('Error importing settings module "%s"!' %
-              options.settings_module)
-        sys.exit(1)
+def main(argv):
+    import settings  # default settings
 
+    (options, args) = parse_options(argv, settings)
 
-def main():
-    # List of input files.
+    try:
+        settings = __import__(options.settings_module, globals(), locals(),
+                              [], -1)  # override with local settings
+    except ImportError:
+        if options.settings_module != 'settings_local':
+            debug('Error importing settings module "%s"!' %
+                  options.settings_module)
+            sys.exit(1)
+
     infiles = options.files if options.files is not None else glob.glob(os.path.join(options.INPUT_DIR, '*.jpg'))
     debug('Found %s input files.' % len(infiles))
 
+    # Generate collage and save output file
+    collage = get_collage(infiles, settings)
+    collage.save(options.OUTPUT_FILE, quality=options.OUTPUT_QUALITY)
+    debug('Wrote output file: %s' % options.OUTPUT_FILE)
+    sys.exit(0)
+
+
+def get_collage(infiles, settings):
     # Create canvas.
     tile_count = len(infiles) + settings.TILE_OFFSET
     COLS = settings.COLS
@@ -109,7 +118,7 @@ def main():
         # Write a number on the image, if desired.
         if settings.WRITE:
             draw = ImageDraw.Draw(img)
-            txt = settings.write_text(imgno)
+            txt = settings.write_text(imgno, tile_file)
 
             # Calculate offsets.
             txtsize = draw.textsize(txt, font=font)
@@ -127,11 +136,7 @@ def main():
 
     # Post-process image.
     settings.post_process(img)
-
-    # Save output file.
-    debug('Writing output file: %s' % options.OUTPUT_FILE)
-    img.save(options.OUTPUT_FILE, quality=options.OUTPUT_QUALITY)
-
+    return img
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv)
